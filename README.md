@@ -64,6 +64,8 @@ Commands are sent via the serial interface to control the behavior of the device
 Big thx to @dagnazty for the work : 
 https://github.com/dagnazty/Evil-BW16-Control-Panel
 
+<img src="./github-img/bw16.png">
+
 ### Example Workflow
 
 1. Start a Wi-Fi scan:
