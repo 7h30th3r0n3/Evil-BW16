@@ -58,6 +58,12 @@ Commands are sent via the serial interface to control the behavior of the device
 - `info` : Display the current configuration.
 - `help` : Display the list of available commands.
 
+
+### Graphical interface
+
+Big thx to @dagnazty for the work : 
+https://github.com/dagnazty/Evil-BW16-Control-Panel
+
 ### Example Workflow
 
 1. Start a Wi-Fi scan:
