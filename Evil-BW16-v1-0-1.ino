@@ -227,76 +227,116 @@ void handleCommand(String command) {
   if (command.equalsIgnoreCase("start")) {
     attack_enabled = true;
     Serial.println("[INFO] Attack started.");
-  } else if (command.equalsIgnoreCase("stop")) {
+  }
+
+  else if (command.equalsIgnoreCase("stop")) {
     attack_enabled = false;
     target_mode = false;
     target_aps.clear();
     Serial.println("[INFO] Attack stopped.");
-  } else if (command.equalsIgnoreCase("scan")) {
+  }
+
+  else if (command.equalsIgnoreCase("scan")) {
     scan_enabled = true;
     Serial.println("[INFO] Starting scan...");
     if (scanNetworks() == 0) {
       printScanResults();
       scan_enabled = false;
       Serial.println("[INFO] Scan completed.");
-    } else {
+    }
+    else {
       Serial.println("[ERROR] Scan failed.");
     }
-  } else if (command.startsWith("set")) {
+  }
+  else if (command.equalsIgnoreCase("results")) {
+    // Print the current scan results
+    if (!scan_results.empty()) {
+      printScanResults();
+    } else {
+      Serial.println("[INFO] No scan results available. Try 'scan' first.");
+    }
+  }
+
+  else if (command.startsWith("set ")) {
     String setting = command.substring(4);
     setting.trim();
     int space_index = setting.indexOf(' ');
     if (space_index != -1) {
       String key = setting.substring(0, space_index);
       String value = setting.substring(space_index + 1);
-      unsigned long new_value = value.toInt();
+      value.replace(" ", "");
 
       if (key.equalsIgnoreCase("cycle_delay")) {
-        cycle_delay = new_value;
+        cycle_delay = value.toInt();
         Serial.println("[INFO] Updated cycle_delay to " + String(cycle_delay) + " ms.");
-      } else if (key.equalsIgnoreCase("scan_time")) {
-        scan_time = new_value;
+      }
+      else if (key.equalsIgnoreCase("scan_time")) {
+        scan_time = value.toInt();
         Serial.println("[INFO] Updated scan_time to " + String(scan_time) + " ms.");
-      } else if (key.equalsIgnoreCase("num_frames")) {
-        num_send_frames = new_value;
+      }
+      else if (key.equalsIgnoreCase("num_frames")) {
+        num_send_frames = value.toInt();
         Serial.println("[INFO] Updated num_send_frames to " + String(num_send_frames) + ".");
-      } else if (key.equalsIgnoreCase("start_channel")) {
-        start_channel = new_value;
+      }
+      else if (key.equalsIgnoreCase("start_channel")) {
+        start_channel = value.toInt();
         Serial.println("[INFO] Updated start_channel to " + String(start_channel) + ".");
-      } else if (key.equalsIgnoreCase("scan_cycles")) {
+      }
+      else if (key.equalsIgnoreCase("scan_cycles")) {
         if (value.equalsIgnoreCase("on")) {
           scan_between_cycles = true;
           Serial.println("[INFO] Scan between attack cycles activated.");
-        } else if (value.equalsIgnoreCase("off")) {
+        }
+        else if (value.equalsIgnoreCase("off")) {
           scan_between_cycles = false;
           Serial.println("[INFO] Scan between attack cycles deactivated.");
-        } else {
-          Serial.println("[ERROR] Invalid value for scan_between_cycles. Use 'on' or 'off'.");
         }
-      } else if (key.equalsIgnoreCase("led")) {
+        else {
+          Serial.println("[ERROR] Invalid value for scan_cycles. Use 'on' or 'off'.");
+        }
+      }
+      else if (key.equalsIgnoreCase("led")) {
         if (value.equalsIgnoreCase("on")) {
           USE_LED = true;
           Serial.println("[INFO] LEDs activated.");
-        } else if (value.equalsIgnoreCase("off")) {
+        }
+        else if (value.equalsIgnoreCase("off")) {
           USE_LED = false;
           Serial.println("[INFO] LEDs deactivated.");
-        } else {
+        }
+        else {
           Serial.println("[ERROR] Invalid value for LED. Use 'set led on' or 'set led off'.");
         }
-      } else if (key.equalsIgnoreCase("target")) {
+      }
+      else if (key.equalsIgnoreCase("target")) {
         // Parse the target AP indices
         target_aps.clear();
-        value.trim();
-        while (value.length() > 0) {
-          int comma_index = value.indexOf(',');
-          String index_str = (comma_index == -1) ? value : value.substring(0, comma_index);
+        target_mode = false;
+
+        int start = 0;
+        int end = 0;
+        while ((end = value.indexOf(',', start)) != -1) {
+          String index_str = value.substring(start, end);
           int target_index = index_str.toInt();
-          if (target_index >= 0 && target_index < scan_results.size()) {
+          if (target_index >= 0 && target_index < (int)scan_results.size()) {
             target_aps.push_back(scan_results[target_index]);
-          } else {
+          }
+          else {
             Serial.println("[ERROR] Invalid target index: " + index_str);
           }
-          value = (comma_index == -1) ? "" : value.substring(comma_index + 1);
+          start = end + 1;
+        }
+
+        // Last index
+        if (start < value.length()) {
+          String index_str = value.substring(start);
+          int target_index = index_str.toInt();
+          if (target_index >= 0 && target_index < (int)scan_results.size()) {
+            target_aps.push_back(scan_results[target_index]);
+          }
+          else {
+            Serial.println("[ERROR] Invalid target index: " + index_str);
+          }
         }
 
         if (!target_aps.empty()) {
@@ -326,8 +366,9 @@ void handleCommand(String command) {
     Serial.println("Number of Frames per AP: " + String(num_send_frames));
     Serial.println("Start Channel: " + String(start_channel));
     Serial.println("Scan between attack cycles: " + String(scan_between_cycles ? "Enabled" : "Disabled"));
+    Serial.println("LEDs: " + String(USE_LED ? "On" : "Off"));
 
-    if (target_mode) {
+    if (target_mode && !target_aps.empty()) {
       Serial.println("[INFO] Targeted APs:");
       for (size_t i = 0; i < target_aps.size(); i++) {
         Serial.print("- SSID: ");
@@ -357,8 +398,6 @@ void handleCommand(String command) {
     Serial.println("[ERROR] Unknown command. Type 'help' for a list of commands.");
   }
 }
-
-
 
 void targetAttack() {
   if (target_mode && attack_enabled) {
