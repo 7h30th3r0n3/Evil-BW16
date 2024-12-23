@@ -527,10 +527,14 @@ void handleCommand(String command) {
     Serial.println("- disassoc: Begin continuous disassociation attacks.");
     Serial.println("- random_attack: Deauth a randomly chosen AP from the scan list.");
     Serial.println("- attack_time <ms>: Start a timed attack for the specified duration.");
-    Serial.println("- set <key> <value>: Update configuration settings.");
-    Serial.println("  * target <indices>, e.g., 'set target 1,3,5'.");
-    Serial.println("  * cycle_delay (ms), scan_time (ms), num_frames, start_channel (1 or 36).");
-    Serial.println("  * scan_cycles on/off, led on/off.");
+    Serial.println("- set <key> <value>: Update configuration values:");
+    Serial.println("  * target <indices>: Set target APs by their indices, e.g., 'set target 1,3,5'.");
+    Serial.println("  * cycle_delay (ms): Delay between scan/deauth cycles.");
+    Serial.println("  * scan_time (ms): Duration of WiFi scans.");
+    Serial.println("  * num_frames: Number of frames sent per AP.");
+    Serial.println("  * start_channel: Start channel for scanning (1 or 36).");
+    Serial.println("  * scan_cycles: on/off - Enable or disable scan between attack cycles.");
+    Serial.println("  * led on/off: Enable or disable LEDs.");
     Serial.println("- info: Display the current configuration.");
     Serial.println("- help: Display this help message.");
   }
