@@ -110,12 +110,41 @@ bool isEAPOL(const uint8_t *buf, int len) {
   return false;
 }
 
+// Add these globals at the start of the file, after the includes
+enum SniffMode {
+  SNIFF_ALL,
+  SNIFF_BEACON,
+  SNIFF_PROBE,
+  SNIFF_DEAUTH,
+  SNIFF_EAPOL,
+  SNIFF_PWNAGOTCHI,
+  SNIFF_STOP
+};
 
+// Channel hopping configuration
+bool isHopping = false;
+unsigned long lastHopTime = 0;
+const unsigned long HOP_INTERVAL = 500; // 500ms between hops
+const int CHANNELS_2GHZ[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14};
+const int CHANNELS_5GHZ[] = {36, 40, 44, 48, 52, 56, 60, 64, 100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140, 144, 149, 153, 157, 161, 165};
+int currentChannelIndex = 0;
+int currentChannel = 36; // Default channel
+
+SniffMode currentMode = SNIFF_STOP;  // Start in STOP mode
+bool isSniffing = false;             // Global flag to track if sniffing is active
+
+// Add these after the other global variables
+const int MAX_CUSTOM_CHANNELS = 50;
+int customChannels[MAX_CUSTOM_CHANNELS];
+int numCustomChannels = 0;
+bool useCustomChannels = false;
 
 // =========================
 // Promiscuous Callback
 // =========================
 void promisc_callback(unsigned char *buf, unsigned int len, void * /*userdata*/) {
+  if (currentMode == SNIFF_STOP) return;
+  
   // Checks the minimum size to contain the 802.11 header
   if (!buf || len < sizeof(wifi_ieee80211_mac_hdr)) {
     return;
@@ -123,10 +152,18 @@ void promisc_callback(unsigned char *buf, unsigned int len, void * /*userdata*/)
 
   // Interpret the header
   wifi_ieee80211_mac_hdr *hdr = (wifi_ieee80211_mac_hdr *)buf;
-  // Frame Control
   uint16_t fc = hdr->frame_control;
-  uint8_t ftype    = ieee80211_get_type(fc);
+  uint8_t ftype = ieee80211_get_type(fc);
   uint8_t fsubtype = ieee80211_get_subtype(fc);
+
+  // Filter based on current mode
+  if (currentMode != SNIFF_ALL) {
+    if (currentMode == SNIFF_BEACON && !(ftype == 0 && fsubtype == 8)) return;
+    if (currentMode == SNIFF_PROBE && !(ftype == 0 && (fsubtype == 4 || fsubtype == 5))) return;
+    if (currentMode == SNIFF_DEAUTH && !(ftype == 0 && (fsubtype == 12 || fsubtype == 10))) return;
+    if (currentMode == SNIFF_EAPOL && (ftype != 2 || !isEAPOL(buf, len))) return;
+    if (currentMode == SNIFF_PWNAGOTCHI && !(ftype == 0 && fsubtype == 8 && isPwnagotchiMac(hdr->addr2))) return;
+  }
 
   String output = ""; // Initialize an output string to store the results
 
@@ -258,23 +295,222 @@ void setup() {
   Serial.begin(115200);
   delay(1000);
 
-  Serial.println("[INFO] Enabling promiscuous mode...");
+  Serial.println("\n[INFO] WiFi Sniffer Commands:");
+  Serial.println("start           - Start the sniffer in ALL mode");
+  Serial.println("sniff beacon    - Start/Switch to beacon capture");
+  Serial.println("sniff probe     - Start/Switch to probe requests/responses");
+  Serial.println("sniff deauth    - Start/Switch to deauth/disassoc frames");
+  Serial.println("sniff eapol     - Start/Switch to EAPOL frames");
+  Serial.println("sniff pwnagotchi- Start/Switch to Pwnagotchi beacons");
+  Serial.println("sniff all       - Start/Switch to all frames");
+  Serial.println("stop            - Stop sniffing");
+  Serial.println("hop on          - Enable channel hopping");
+  Serial.println("hop off         - Disable channel hopping");
+  Serial.println("set ch X        - Set to specific channel X");
+  
+  Serial.println("\n[INFO] Waiting for command to start...");
+}
 
-  // 1) Enable WiFi in PROMISC mode
-  wifi_on(RTW_MODE_PROMISC);
-  wifi_enter_promisc_mode();
+void setChannel(int newChannel) {
+    if (!isSniffing) {
+        // Need to initialize WiFi first
+        wifi_on(RTW_MODE_PROMISC);
+        wifi_enter_promisc_mode();
+    }
+    currentChannel = newChannel;
+    wifi_set_channel(currentChannel);
+}
 
-  // 2) Set channel
-  wifi_set_channel(36);
+void hopChannel() {
+    if (isHopping && (millis() - lastHopTime >= HOP_INTERVAL)) {
+        currentChannelIndex++;
+        
+        if (useCustomChannels) {
+            if (currentChannelIndex >= numCustomChannels) {
+                currentChannelIndex = 0;
+            }
+            currentChannel = customChannels[currentChannelIndex];
+        } else {
+            if (currentChannelIndex >= sizeof(CHANNELS_2GHZ)/sizeof(CHANNELS_2GHZ[0])) {
+                currentChannelIndex = 0;
+            }
+            currentChannel = CHANNELS_2GHZ[currentChannelIndex];
+        }
+        
+        setChannel(currentChannel);
+        Serial.print("[HOP] Switched to channel ");
+        Serial.println(currentChannel);
+        lastHopTime = millis();
+    }
+}
 
-  // 3) Start capture (depending on your SDK, use RTW_PROMISC_ENABLE / RTW_PROMISC_ENABLE_2 / etc.)
-  wifi_set_promisc(RTW_PROMISC_ENABLE_2, promisc_callback, 1);
+void startSniffing() {
+  if (!isSniffing) {
+    Serial.println("[INFO] Enabling promiscuous mode...");
+    
+    // Initialize WiFi in PROMISC mode
+    wifi_on(RTW_MODE_PROMISC);
+    wifi_enter_promisc_mode();
+    setChannel(currentChannel);
+    wifi_set_promisc(RTW_PROMISC_ENABLE_2, promisc_callback, 1);
+    
+    isSniffing = true;
+    Serial.println("[INFO] Sniffer initialized and running.");
+  }
+}
 
-  Serial.println("[INFO] Sniffer initialized, listening.");
+void stopSniffing() {
+  if (isSniffing) {
+    wifi_set_promisc(RTW_PROMISC_DISABLE, NULL, 0);
+    isSniffing = false;
+    currentMode = SNIFF_STOP;
+    Serial.println("[CMD] Sniffer stopped");
+  }
+}
+
+void processCommand(String command) {
+  command.toLowerCase();
+  command.trim();
+  
+  if (command == "start") {
+    currentMode = SNIFF_ALL;
+    startSniffing();
+    Serial.println("[CMD] Starting sniffer in ALL mode");
+  }
+  else if (command == "hop on") {
+    isHopping = true;
+    if (!isSniffing) {
+        wifi_on(RTW_MODE_PROMISC);
+        wifi_enter_promisc_mode();
+    }
+    Serial.println("[CMD] Channel hopping enabled");
+  }
+  else if (command == "hop off") {
+    isHopping = false;
+    Serial.println("[CMD] Channel hopping disabled");
+  }
+  else if (command.startsWith("set ch ")) {
+    String chStr = command.substring(7);
+    
+    // Check if it's a comma-separated list
+    if (chStr.indexOf(',') != -1) {
+      // Reset custom channels
+      numCustomChannels = 0;
+      useCustomChannels = false;
+      
+      // Parse comma-separated channels
+      while (chStr.length() > 0) {
+        int commaIndex = chStr.indexOf(',');
+        String channelStr;
+        
+        if (commaIndex == -1) {
+          channelStr = chStr;
+          chStr = "";
+        } else {
+          channelStr = chStr.substring(0, commaIndex);
+          chStr = chStr.substring(commaIndex + 1);
+        }
+        
+        channelStr.trim();
+        int newChannel = channelStr.toInt();
+        
+        // Validate channel
+        bool validChannel = false;
+        for (int ch : CHANNELS_2GHZ) {
+          if (ch == newChannel) validChannel = true;
+        }
+        for (int ch : CHANNELS_5GHZ) {
+          if (ch == newChannel) validChannel = true;
+        }
+        
+        if (validChannel && numCustomChannels < MAX_CUSTOM_CHANNELS) {
+          customChannels[numCustomChannels++] = newChannel;
+        }
+      }
+      
+      if (numCustomChannels > 0) {
+        useCustomChannels = true;
+        isHopping = true;
+        currentChannelIndex = 0;
+        currentChannel = customChannels[0];
+        setChannel(currentChannel);
+        Serial.print("[CMD] Set custom channel sequence: ");
+        for (int i = 0; i < numCustomChannels; i++) {
+          Serial.print(customChannels[i]);
+          if (i < numCustomChannels - 1) Serial.print(",");
+        }
+        Serial.println();
+      }
+    } else {
+      // Single channel setting (existing code)
+      int newChannel = chStr.toInt();
+      bool validChannel = false;
+      for (int ch : CHANNELS_2GHZ) {
+        if (ch == newChannel) validChannel = true;
+      }
+      for (int ch : CHANNELS_5GHZ) {
+        if (ch == newChannel) validChannel = true;
+      }
+      if (validChannel) {
+        isHopping = false;
+        useCustomChannels = false;
+        setChannel(newChannel);
+        Serial.print("[CMD] Set to channel ");
+        Serial.println(currentChannel);
+      } else {
+        Serial.println("[ERROR] Invalid channel number");
+      }
+    }
+  }
+  else if (command == "sniff beacon") {
+    currentMode = SNIFF_BEACON;
+    startSniffing();
+    Serial.println("[CMD] Switching to BEACON sniffing mode");
+  }
+  else if (command == "sniff probe") {
+    currentMode = SNIFF_PROBE;
+    startSniffing();
+    Serial.println("[CMD] Switching to PROBE sniffing mode");
+  }
+  else if (command == "sniff deauth") {
+    currentMode = SNIFF_DEAUTH;
+    startSniffing();
+    Serial.println("[CMD] Switching to DEAUTH sniffing mode");
+  }
+  else if (command == "sniff eapol") {
+    currentMode = SNIFF_EAPOL;
+    startSniffing();
+    Serial.println("[CMD] Switching to EAPOL sniffing mode");
+  }
+  else if (command == "sniff pwnagotchi") {
+    currentMode = SNIFF_PWNAGOTCHI;
+    startSniffing();
+    Serial.println("[CMD] Switching to PWNAGOTCHI sniffing mode");
+  }
+  else if (command == "sniff all") {
+    currentMode = SNIFF_ALL;
+    startSniffing();
+    Serial.println("[CMD] Switching to ALL sniffing mode");
+  }
+  else if (command == "stop") {
+    stopSniffing();
+  }
+  else {
+    Serial.println("[ERROR] Unknown command");
+  }
 }
 
 void loop() {
-  // The promiscuous callback (promisc_callback) is invoked in the background
-  // as soon as a packet is intercepted on the current channel.
+  // Check for serial commands
+  if (Serial.available()) {
+    String command = Serial.readStringUntil('\n');
+    processCommand(command);
+  }
+  
+  // Handle channel hopping if enabled
+  if (isSniffing) {
+    hopChannel();
+  }
+  
   delay(100);
 }
