@@ -749,8 +749,7 @@ void handleCommand(String command) {
       Serial.println("[ERROR] No AP results available. Run 'scan' first.");
     }
   }
-
-  if (command == "start sniff") {
+  else if (command == "start sniff") {
     currentMode = SNIFF_ALL;
     startSniffing();
     Serial.println("[CMD] Starting sniffer in ALL mode");
