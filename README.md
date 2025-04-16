@@ -21,7 +21,7 @@ This tool is intended for educational purposes and ethical penetration testing o
 ## Requirements
 
 - **Hardware:**
-  - BW16 Module (https://s.click.aliexpress.com/e/_oENtnjD)
+  - BW16 Module (https://s.click.aliexpress.com/e/_oENtnjD) Choose BW16 KIT Type-C
   - Compatible LED indicators (optional)
 - **Software:**
   - Arduino IDE (1.8.19 or higher recommended)
