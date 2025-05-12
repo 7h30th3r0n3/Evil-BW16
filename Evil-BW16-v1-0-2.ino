@@ -30,12 +30,20 @@
 */
 
 #include <Arduino.h>
-#include <vector>
 #include "wifi_conf.h"
 #include "wifi_util.h"
 #include "wifi_structures.h"
 #include "WiFi.h"
 #include "platform_stdlib.h"
+
+#ifdef max
+#undef max
+#endif
+#ifdef min
+#undef min
+#endif
+
+#include <vector>
 
 //==========================
 // User Configuration
